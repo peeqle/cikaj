@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::ops::Deref;
 use std::str::FromStr;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::{Arc, LazyLock};
 use tokio::sync::Mutex;
 //todo

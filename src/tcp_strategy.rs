@@ -10,7 +10,7 @@ use std::str::FromStr;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpSocket, UdpSocket};
 use tokio::sync::{Mutex, MutexGuard};
 
@@ -61,16 +61,30 @@ async fn listen_tcp(serv: MutexGuard<'static, Option<TcpListener>>) {
     println!("Connected service");
 
     match serv.as_ref()
-        .expect("as")
+        .expect("Listener reference allocation error")
         .accept().await {
         Ok((mut _socket, addr)) => {
-            println!("new client: {:?}", addr);
+            println!("New client: {:?}", addr);
+
             loop {
                 let mut buf = vec![0; 16];
-                let n = _socket.read(&mut buf).await
-                    .expect("TODO: panic message");
-                if n > 0 {
-                    println!("Data {:?}", String::from_utf8_lossy(&buf))
+                match _socket.read(&mut buf).await {
+                    Ok(0) => {
+                        println!("Client {:?} closed the connection", addr);
+                        break;
+                    }
+                    Ok(n) => {
+                        println!("Received {} bytes from {:?}", n, addr);
+
+                        if let Err(e) = _socket.write_all(&buf[0..n]).await {
+                            println!("Failed to send response: {}", e);
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        println!("Error reading from socket: {:?}", e);
+                        break;
+                    }
                 }
             }
         }
