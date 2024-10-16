@@ -5,7 +5,6 @@ mod token_cache;
 mod udp_strategy;
 mod errors;
 mod tcp_strategy;
-mod connection_strategy;
 
 use crate::tcp_strategy::{TcpConnection, TcpStrategy};
 use aes_gcm::aead::consts::U32;
@@ -22,6 +21,7 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, AtomicU32};
 use std::sync::{Arc, LazyLock};
 use tokio::sync::Mutex;
+use crate::udp_strategy::{UdpConnection, UdpStrategy};
 //todo
 //send nonce in metadata message
 //make clients registry
@@ -38,11 +38,18 @@ static BIND_SOCKETS: Lazy<Arc<Mutex<Box<HashMap<Arc<&'static str>, AtomicBool>>>
 static TCP_SOCKETS: Lazy<Arc<Mutex<Box<HashMap<Arc<&'static str>, AtomicBool>>>>> = Lazy::new(|| Arc::new(Mutex::new(Box::new(HashMap::new()))));
 #[tokio::main]
 async fn main() {
-    let mut tcp_connection = TcpStrategy {
+    // let mut tcp_connection = TcpStrategy {
+    //     state_holder: &TCP_SOCKETS
+    // };
+    // tcp_connection.initialize_socket().await.unwrap();
+    // tcp_connection.bind_socket().await;
+
+    let mut udp_connection = UdpStrategy {
         state_holder: &TCP_SOCKETS
     };
-    tcp_connection.initialize_socket().await.unwrap();
-    tcp_connection.bind_socket().await;
+
+    udp_connection.initialize_socket().await.unwrap();
+    udp_connection.bind_socket().await;
 }
 
 #[derive(Serialize, Deserialize)]

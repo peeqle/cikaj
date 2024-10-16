@@ -57,7 +57,7 @@ impl TcpConnection for TcpStrategy {
     }
 }
 
-async fn listen_tcp(serv: MutexGuard<'static, Option<TcpListener>>) {
+async fn listen_tcp(serv: MutexGuard<'_, Option<TcpListener>>) {
     println!("Connected service");
 
     match serv.as_ref()

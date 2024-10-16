@@ -4,7 +4,7 @@ use std::net::AddrParseError;
 #[derive(Debug)]
 pub enum SocketInitErrors {
     Addr(AddrParseError),
-    Plain(io::Error),
+    Plain(()),
 }
 impl From<AddrParseError> for SocketInitErrors {
     fn from(value: AddrParseError) -> Self {
@@ -13,6 +13,6 @@ impl From<AddrParseError> for SocketInitErrors {
 }
 impl From<io::Error> for SocketInitErrors {
     fn from(value: io::Error) -> Self {
-        SocketInitErrors::Plain(value)
+        SocketInitErrors::Plain(())
     }
 }
