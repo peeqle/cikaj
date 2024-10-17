@@ -1,16 +1,15 @@
 use crate::errors::SocketInitErrors;
 use crate::SERVER_ADDR;
-use log::error;
 use once_cell::sync::Lazy;
 use std::collections::HashMap;
 use std::net::SocketAddr;
-use std::ops::Deref;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use tokio::net::{TcpListener, UdpSocket};
-use tokio::sync::{mpsc, Mutex, MutexGuard};
+use tokio::net::UdpSocket;
+use tokio::sync::{mpsc, Mutex};
 
-static SERVER_UDP_SOCKET: Lazy<Arc<Mutex<Option<UdpSocket>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
+static SERVER_UDP_SOCKET: Lazy<Arc<Mutex<Option<UdpSocket>>>> =
+    Lazy::new(|| Arc::new(Mutex::new(None)));
 
 #[derive(Debug)]
 pub struct UdpStrategy {
@@ -35,21 +34,21 @@ impl UdpConnection for UdpStrategy {
     }
 
     async fn bind_socket(&self) {
-        let socket_guard = SERVER_UDP_SOCKET.lock().await;
-        if let Some(ref socket) = *socket_guard {
-            tokio::spawn(async move {
-                listen_udp(socket_guard).await;
-            }).await.unwrap();
-            println!("{:#?}", self.state_holder);
-        } else {
-            error!("Socket is not initialized");
-        }
+        let cl = SERVER_UDP_SOCKET.lock().await;
+        let socket_guard = Arc::new(Box::new(cl).take().unwrap());
+
+        tokio::spawn(async move {
+            listen_udp(socket_guard).await;
+        })
+        .await
+        .unwrap();
+        println!("{:#?}", self.state_holder);
     }
 }
 
-async fn listen_udp(serv: MutexGuard<'static, Option<UdpSocket>>) {
+async fn listen_udp(serv: Arc<UdpSocket>) {
     let (sender, mut receiver) = mpsc::channel::<(Vec<u8>, SocketAddr)>(1_000);
-    let s = serv?.clone();
+    let s = Arc::clone(&serv);
 
     tokio::spawn(async move {
         while let Some((bytes, addr)) = receiver.recv().await {
@@ -58,12 +57,26 @@ async fn listen_udp(serv: MutexGuard<'static, Option<UdpSocket>>) {
         }
     });
 
-    let mut buf = [0; 1024];
+    let mut buf = [0; 196];
     loop {
-        let (len, addr) = serv.as_ref().expect("Error while opening UDP receiver")
-            .recv_from(&mut buf).await.unwrap();
+        let (len, addr) = match serv.clone().as_ref().recv_from(&mut buf).await {
+            Ok((len, addr)) => {
+                println!(
+                    "Received {} bytes from {:?} -> {:?}",
+                    len,
+                    addr,
+                    String::from_utf8_lossy(&buf).trim()
+                );
+                (len, addr)
+            }
+            Err(e) => {
+                println!("Error reading from socket: {:?}", e);
+                return;
+            }
+        };
 
-        println!("{:?} bytes received from {:?}", len, addr);
-        sender.send((buf[..len].to_vec(), addr)).await.unwrap();
+        if let Err(e) = sender.send((buf[0..len].to_vec(), addr)).await {
+            println!("Failed to send response: {}", e);
+        }
     }
 }
