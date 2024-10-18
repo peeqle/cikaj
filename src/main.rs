@@ -5,6 +5,8 @@ mod token_cache;
 mod udp_strategy;
 mod errors;
 mod tcp_strategy;
+mod system_tunneling;
+mod encryption_exchanger;
 
 use crate::tcp_strategy::{TcpConnection, TcpStrategy};
 use aes_gcm::aead::consts::U32;

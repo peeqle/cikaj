@@ -7,27 +7,46 @@ use std::net::SocketAddr;
 use std::ops::Deref;
 use std::ptr::copy;
 use std::str::FromStr;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpSocket, UdpSocket};
+use tokio::net::{TcpListener, TcpSocket};
 use tokio::sync::{Mutex, MutexGuard};
 
-static SERVER_TCP_SOCKET: Lazy<Arc<Mutex<Option<TcpListener>>>> = Lazy::new(|| Arc::new(Mutex::new(None)));
+static SERVER_TCP_SOCKET: Lazy<Mutex<Option<Arc<TcpListener>>>> = Lazy::new(|| Mutex::new(None));
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug)]
 pub struct TcpStrategy {
-    pub(crate) state_holder: &'static Arc<Mutex<Box<HashMap<Arc<&'static str>, AtomicBool>>>>,
+    pub stateless: AtomicBool,
+    pub(crate) state_holder: Arc<Mutex<Box<HashMap<Arc<&'static str>, AtomicBool>>>>,
 }
 pub(crate) trait TcpConnection {
     async fn initialize_socket(&self) -> Result<(), SocketInitErrors>;
     async fn bind_socket(&self);
 }
 
+impl Clone for TcpStrategy {
+    fn clone(&self) -> Self {
+        TcpStrategy {
+            stateless: AtomicBool::new(self.stateless.fetch_or(true, Ordering::Acquire)),
+            state_holder: self.state_holder.clone(),
+        }
+    }
+}
+
+impl Default for TcpStrategy {
+    fn default() -> Self {
+        TcpStrategy {
+            stateless: AtomicBool::new(true),
+            state_holder: Arc::new(Mutex::new(Box::new(HashMap::new()))),
+        }
+    }
+}
+
 impl TcpConnection for TcpStrategy {
     async fn initialize_socket(&self) -> Result<(), SocketInitErrors> {
-        let mut socket = TcpSocket::new_v4()?;
+        let socket = TcpSocket::new_v4()?;
 
         socket.set_linger(Some(Duration::new(5, 0)))?;
         socket.set_reuseaddr(true)?;
@@ -37,32 +56,35 @@ impl TcpConnection for TcpStrategy {
         let listener = socket.listen(1)?;
 
         let mut socket_guard = SERVER_TCP_SOCKET.lock().await;
-        *socket_guard = Some(listener);
+        *socket_guard = Some(Arc::new(listener));
 
-        let mut bind_ = self.state_holder.lock().await;
-        bind_.insert(Arc::new(SERVER_ADDR), AtomicBool::new(true));
+        if !self.stateless.fetch_or(true, Ordering::Acquire) {
+            let mut bind_ = self.state_holder.lock().await;
+            bind_.insert(Arc::new(SERVER_ADDR), AtomicBool::new(true));
+        }
         Ok(())
     }
 
     async fn bind_socket(&self) {
-        let socket_guard = SERVER_TCP_SOCKET.lock().await;
-        if let Some(ref socket) = *socket_guard {
+        if let Some(ref _socket) = *SERVER_TCP_SOCKET.lock().await {
+            let _socket_cp = Arc::clone(_socket);
             tokio::spawn(async move {
-                listen_tcp(socket_guard).await;
-            }).await.unwrap();
+                listen_tcp(_socket_cp).await;
+            })
+            .await
+            .unwrap();
             println!("{:#?}", self.state_holder);
         } else {
             error!("Socket is not initialized");
         }
     }
 }
+async fn send() {}
 
-async fn listen_tcp(serv: MutexGuard<'_, Option<TcpListener>>) {
+async fn listen_tcp(serv: Arc<TcpListener>) {
     println!("Connected service");
 
-    match serv.as_ref()
-        .expect("Listener reference allocation error")
-        .accept().await {
+    match serv.accept().await {
         Ok((mut _socket, addr)) => {
             println!("New client: {:?}", addr);
 
